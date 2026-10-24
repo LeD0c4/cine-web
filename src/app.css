@@ -1,0 +1,229 @@
+:root {
+  --bg: #0b0c0f;
+  --bg-2: #121418;
+  --surface: #191c22;
+  --surface-2: #22262e;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #f4f5f7;
+  --text-2: rgba(230, 233, 238, 0.74);
+  --text-3: rgba(230, 233, 238, 0.48);
+  --silver: linear-gradient(180deg, #ffffff 0%, #c9ccd3 100%);
+  --gold: #f7a01f;
+  --gold-hot: #fd7a10;
+  --gold-grad: linear-gradient(135deg, #ffc350 0%, #fb9a22 45%, #f2690c 100%);
+  --gold-soft: rgba(247, 160, 31, 0.16);
+  --danger: #ff5f5f;
+  --pad: clamp(1rem, 4vw, 3.5rem);
+  --radius: 0.6rem;
+  color-scheme: dark;
+  font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+  font-feature-settings: 'cv11';
+}
+
+html {
+  font-size: 16px;
+}
+/* Moteurs web anciens (télés) sans clamp() */
+@supports not (width: clamp(1px, 1px, 1px)) {
+  :root {
+    --pad: 2.5rem;
+  }
+}
+@media (min-width: 1700px) {
+  html {
+    font-size: 18px;
+  }
+}
+@media (max-width: 700px) {
+  html {
+    font-size: 15px;
+  }
+}
+/* Télé : tout est proportionnel à la largeur de l'écran (lisible depuis le canapé) */
+html.tv {
+  font-size: 1.05vw;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+}
+
+.ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Boutons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 2.9rem;
+  padding: 0 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 1.05rem;
+  white-space: nowrap;
+  transition: transform 0.15s ease, filter 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn.gold {
+  color: #1b1104;
+  background: var(--gold-grad);
+  box-shadow: 0 0.5rem 1.4rem rgba(253, 122, 16, 0.28);
+}
+.btn.gold:hover {
+  filter: brightness(1.08);
+}
+.btn.glass {
+  color: var(--text);
+  background: rgba(120, 126, 140, 0.32);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.btn.glass:hover {
+  background: rgba(140, 146, 160, 0.42);
+}
+.round {
+  display: inline-grid;
+  place-items: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  background: rgba(20, 22, 27, 0.55);
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.round:hover {
+  border-color: #fff;
+}
+.round.on {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 1.5rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+}
+
+.input {
+  width: 100%;
+  min-height: 3.2rem;
+  padding: 0 1rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  outline: none;
+  font-size: 1.05rem;
+}
+.input:focus {
+  border-color: var(--gold);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* Focus visible au clavier et à la télécommande : liseré or */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+.tv :focus {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+
+/* Barres de défilement discrètes */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.fade-in {
+  animation: fade-in 0.35s ease both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.spinner {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--gold);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

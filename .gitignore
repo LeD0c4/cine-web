@@ -1,0 +1,8 @@
+node_modules
+dist
+*.tgz
+dist-app
+
+# Données locales
+.claude/
+*.log

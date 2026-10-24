@@ -1,0 +1,12 @@
+# Autorise les applis Selvania Ciné (Android, LG, Xbox…) à parler directement à Jellyfin.
+# À placer dans le dossier des règles « file » de Traefik, puis mettre « jellyfin-cors@file »
+# EN PREMIER dans les middlewares du routeur Jellyfin (avant une chaîne qui répond elle-même aux
+# pré-requêtes CORS). install-vps.sh le fait.
+http:
+  middlewares:
+    jellyfin-cors:
+      headers:
+        accessControlAllowOriginList: ["*"]
+        accessControlAllowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        accessControlAllowHeaders: ["Authorization", "Content-Type", "X-Emby-Authorization"]
+        accessControlMaxAge: 600

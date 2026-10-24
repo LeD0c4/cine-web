@@ -1,0 +1,17 @@
+# Exemple de routeur Traefik (fournisseur « file ») pour le site Selvania Ciné.
+# À copier dans le dossier des règles de Traefik et à adapter : domaine, entryPoint, résolveur de
+# certificats, middlewares de votre installation.
+http:
+  routers:
+    cine-rtr:
+      entryPoints:
+        - websecure
+      rule: "Host(`cine.example.com`)"
+      service: cine-svc
+      tls:
+        certResolver: letsencrypt
+  services:
+    cine-svc:
+      loadBalancer:
+        servers:
+          - url: "http://cine-web:80"

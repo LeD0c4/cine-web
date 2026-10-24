@@ -1,0 +1,26 @@
+# Vérifie l'interface à chaque envoi et chaque pull request : types, site et version « appli ».
+name: Vérification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - name: Types (TypeScript / Svelte)
+        run: npm run check
+      - name: Site
+        run: npm run build
+      - name: Version appli (Android, LG)
+        run: npm run build:app
