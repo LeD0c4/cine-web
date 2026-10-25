@@ -21,16 +21,19 @@ if [ -d "$CINE_DIR/dist" ]; then
   tar -czf "$HOME/cine-web-sauvegarde-$STAMP.tgz" -C "$CINE_DIR" dist
   echo "   ancienne version sauvegardée : ~/cine-web-sauvegarde-$STAMP.tgz"
 fi
-rm -rf "$CINE_DIR/dist.new"
-cp -r "$PACK/dist" "$CINE_DIR/dist.new"
-rm -rf "$CINE_DIR/dist" && mv "$CINE_DIR/dist.new" "$CINE_DIR/dist"
+# Mise à jour DANS le dossier existant : le conteneur nginx y est attaché ; remplacer le dossier
+# lui ferait garder l'ancien (supprimé) et répondre « 500 ».
+mkdir -p "$CINE_DIR/dist"
+find "$CINE_DIR/dist" -mindepth 1 -delete
+cp -r "$PACK/dist/." "$CINE_DIR/dist/"
 for f in nginx.conf docker-compose.yml; do cp "$PACK/$f" "$CINE_DIR/$f"; done
 # Le .env (réseau Docker de Traefik) est conservé ; créé seulement à la première installation.
 [ -f "$CINE_DIR/.env" ] || cp "$PACK/.env" "$CINE_DIR/.env"
 if grep -q 'a-remplacer' "$CINE_DIR/.env"; then
   echo "   ⚠ Réglez TRAEFIK_NETWORK dans $CINE_DIR/.env (réseau Docker de Traefik et Jellyfin), puis relancez ce script."
 else
-  (cd "$CINE_DIR" && docker compose up -d)
+  # « restart » : nginx relit la configuration et repart sur les nouveaux fichiers.
+  (cd "$CINE_DIR" && docker compose up -d && docker compose restart)
 fi
 
 echo "== Traefik : middleware jellyfin-cors (applis Android / LG / Xbox)"

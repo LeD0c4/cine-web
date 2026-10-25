@@ -2,23 +2,30 @@
   import {
     mdiServerNetwork, mdiFolderMultipleOutline, mdiAccountMultipleOutline, mdiDevices, mdiTimerCogOutline,
     mdiTextBoxOutline, mdiTuneVariant, mdiRefresh, mdiStop, mdiPlay, mdiMessageTextOutline, mdiRestart,
-    mdiAccountPlusOutline, mdiDeleteOutline, mdiKeyOutline, mdiPalette,
+    mdiAccountPlusOutline, mdiDeleteOutline, mdiKeyOutline, mdiPalette, mdiPuzzleOutline, mdiKeyChainVariant,
+    mdiDownload, mdiUpdate, mdiPlus, mdiContentCopy, mdiFileDocumentOutline,
   } from '@mdi/js';
-  import { admin, withTheme, hasTheme, type ServerInfo, type Session, type Library, type User, type Device, type Task, type LogEntry } from '../lib/admin';
+  import {
+    admin, withTheme, hasTheme, newer,
+    type ServerInfo, type Session, type Library, type User, type Device, type Task, type LogEntry,
+    type Plugin, type Package, type Repository, type ApiKey, type LogFile,
+  } from '../lib/admin';
   import { session } from '../lib/session.svelte';
   import { TICKS } from '../lib/jellyfin';
   import { clock } from '../lib/format';
   import { handle } from '../lib/errors';
   import Icon from '../components/Icon.svelte';
 
-  type Tab = 'server' | 'libraries' | 'users' | 'devices' | 'tasks' | 'log' | 'settings';
+  type Tab = 'server' | 'libraries' | 'users' | 'plugins' | 'devices' | 'tasks' | 'log' | 'keys' | 'settings';
   const TABS: { id: Tab; label: string; icon: string }[] = [
     { id: 'server', label: 'Serveur', icon: mdiServerNetwork },
     { id: 'libraries', label: 'Médiathèques', icon: mdiFolderMultipleOutline },
     { id: 'users', label: 'Utilisateurs', icon: mdiAccountMultipleOutline },
+    { id: 'plugins', label: 'Extensions', icon: mdiPuzzleOutline },
     { id: 'devices', label: 'Appareils', icon: mdiDevices },
     { id: 'tasks', label: 'Tâches', icon: mdiTimerCogOutline },
     { id: 'log', label: 'Journal', icon: mdiTextBoxOutline },
+    { id: 'keys', label: 'Clés d’API', icon: mdiKeyChainVariant },
     { id: 'settings', label: 'Réglages', icon: mdiTuneVariant },
   ];
   let tab = $state<Tab>('server');
@@ -68,20 +75,33 @@
   let log = $state<LogEntry[]>([]);
   let config = $state<Record<string, any> | null>(null);
   let encoding = $state<Record<string, any> | null>(null);
+  let network = $state<Record<string, any> | null>(null);
   let themeOn = $state(false);
+  let plugins = $state<Plugin[]>([]);
+  let packages = $state<Package[] | null>(null);
+  let repos = $state<Repository[]>([]);
+  let keys = $state<ApiKey[]>([]);
+  let logFiles = $state<LogFile[]>([]);
 
   async function load() {
     try {
       if (tab === 'server') [info, sessions] = await Promise.all([admin.info(), admin.sessions()]);
       else if (tab === 'libraries') [libraries, counts] = await Promise.all([admin.libraries(), admin.counts()]);
-      else if (tab === 'users') users = await admin.users();
-      else if (tab === 'devices') devices = await admin.devices();
+      else if (tab === 'users') [users, libraries] = await Promise.all([admin.users(), admin.libraries()]);
+      else if (tab === 'plugins') {
+        [plugins, repos, info] = await Promise.all([admin.plugins(), admin.repositories(), admin.info()]);
+        // Le catalogue (tous les dépôts) est long à lire : une fois par visite de l'onglet.
+        if (!packages) packages = await admin.packages().catch(() => []);
+      } else if (tab === 'devices') devices = await admin.devices();
       else if (tab === 'tasks') tasks = await admin.tasks();
-      else if (tab === 'log') log = await admin.activity();
+      else if (tab === 'log') [log, logFiles] = await Promise.all([admin.activity(), admin.logFiles().catch(() => [])]);
+      else if (tab === 'keys') keys = await admin.apiKeys();
       else if (tab === 'settings') {
-        const [c, e, b] = await Promise.all([admin.config(), admin.encoding(), admin.branding()]);
+        const [c, e, b, n] = await Promise.all([admin.config(), admin.encoding(), admin.branding(), admin.network().catch(() => null)]);
         config = c;
         encoding = e;
+        network = n;
+        proxies = (n?.KnownProxies ?? []).join(', ');
         themeOn = hasTheme(b.CustomCss);
       }
     } catch (err) {
@@ -118,6 +138,88 @@
 
   async function togglePolicy(u: User, key: 'IsAdministrator' | 'IsDisabled' | 'EnableRemoteAccess' | 'EnableContentDownloading') {
     await act(`${u.Id}:${key}`, () => admin.setPolicy(u.Id, { ...u.Policy, [key]: !u.Policy[key] }));
+  }
+
+  // Médiathèques visibles par l'utilisateur : toutes, ou une sélection.
+  const allFolders = (u: User) => u.Policy.EnableAllFolders !== false;
+  const folders = (u: User) => (u.Policy.EnabledFolders as string[] | undefined) ?? [];
+  async function setAllFolders(u: User, all: boolean) {
+    const enabled = all ? [] : libraries.map((l) => l.ItemId);
+    await act(`${u.Id}:folders`, () => admin.setPolicy(u.Id, { ...u.Policy, EnableAllFolders: all, EnabledFolders: enabled }));
+  }
+  async function toggleFolder(u: User, id: string) {
+    const list = folders(u);
+    const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+    await act(`${u.Id}:folders`, () => admin.setPolicy(u.Id, { ...u.Policy, EnableAllFolders: false, EnabledFolders: next }));
+  }
+
+  // ---------- Extensions ----------
+  const PLUGIN_STATUS: Record<string, string> = {
+    Active: 'Active', Disabled: 'Désactivée', Restart: 'Redémarrage nécessaire', Malfunctioned: 'En erreur',
+    NotSupported: 'Non compatible', Superceded: 'Remplacée', Deleted: 'Supprimée au redémarrage',
+  };
+  const guid = (id: string) => id.replace(/-/g, '').toLowerCase();
+  const installed = $derived(new Set(plugins.map((p) => guid(p.Id))));
+  /** Version plus récente dans le catalogue pour une extension installée. */
+  function update(p: Plugin) {
+    const pkg = packages?.find((x) => guid(x.guid) === guid(p.Id));
+    const latest = pkg?.versions[0];
+    return pkg && latest && newer(latest.version, p.Version) ? { pkg, version: latest } : null;
+  }
+  let pkgQuery = $state('');
+  let pkgCategory = $state('');
+  const categories = $derived([...new Set((packages ?? []).map((x) => x.category).filter(Boolean) as string[])].sort());
+  const catalog = $derived(
+    (packages ?? [])
+      .filter((x) => !installed.has(guid(x.guid)))
+      .filter((x) => !pkgCategory || x.category === pkgCategory)
+      .filter((x) => !pkgQuery.trim() || `${x.name} ${x.description ?? ''} ${x.overview ?? ''}`.toLowerCase().includes(pkgQuery.trim().toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
+  let repoName = $state('');
+  let repoUrl = $state('');
+  async function saveRepos(list: Repository[], done: string) {
+    await act('repos', async () => {
+      await admin.saveRepositories(list);
+      packages = null; // le catalogue change avec les dépôts
+    }, done);
+  }
+
+  // ---------- Clés d'API ----------
+  let keyName = $state('');
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      flash('Clé copiée');
+    } catch {
+      flash('Copie impossible : sélectionnez la clé à la main');
+    }
+  }
+
+  // ---------- Journal ----------
+  let logView = $state<'activity' | 'files'>('activity');
+  let logName = $state('');
+  let logText = $state('');
+  async function openLog(name: string) {
+    logName = name;
+    logText = 'Chargement…';
+    try {
+      const text = await admin.logFile(name);
+      // Les fichiers peuvent être gros : les 600 dernières lignes suffisent pour un diagnostic.
+      logText = String(text).split('\n').slice(-600).join('\n');
+    } catch (err) {
+      logText = handle(err);
+    }
+  }
+  const size = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} Mo` : `${Math.max(1, Math.round(n / 1024))} ko`);
+
+  // ---------- Réseau ----------
+  let proxies = $state('');
+  async function saveNetwork() {
+    const n = network;
+    if (!n) return;
+    const list = proxies.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    await act('network', () => admin.saveNetwork({ ...$state.snapshot(n), KnownProxies: list }), 'Réglages réseau enregistrés (redémarrage du serveur conseillé)');
   }
 
   // ---------- Réglages ----------
@@ -276,6 +378,17 @@
             <button class="opt" class:on={u.Policy.EnableContentDownloading} onclick={() => togglePolicy(u, 'EnableContentDownloading')}>Téléchargements</button>
             <button class="opt" class:off={u.Policy.IsDisabled} disabled={u.Id === me} onclick={() => togglePolicy(u, 'IsDisabled')}>{u.Policy.IsDisabled ? 'Désactivé' : 'Actif'}</button>
           </div>
+          {#if libraries.length}
+            <div class="chips libs">
+              <span class="hint small">Médiathèques :</span>
+              <button class="opt" class:on={allFolders(u)} onclick={() => setAllFolders(u, !allFolders(u))}>Toutes</button>
+              {#if !allFolders(u)}
+                {#each libraries as l (l.ItemId)}
+                  <button class="opt" class:on={folders(u).includes(l.ItemId)} onclick={() => toggleFolder(u, l.ItemId)}>{l.Name}</button>
+                {/each}
+              {/if}
+            </div>
+          {/if}
           <div class="u-a">
             {#if pwFor === u.Id}
               <input class="input small-in" type="password" placeholder="Nouveau mot de passe" bind:value={pwValue} autocomplete="new-password" />
@@ -300,6 +413,100 @@
         <button class="btn gold" disabled={!newName.trim() || busy === 'new'}
           onclick={() => act('new', async () => { await admin.createUser(newName.trim(), newPassword); newName = ''; newPassword = ''; }, 'Utilisateur créé')}>
           <Icon path={mdiAccountPlusOutline} size={1.2} /> Créer
+        </button>
+      </div>
+    </section>
+  {:else if tab === 'plugins'}
+    {#if info?.HasPendingRestart}
+      <p class="warn-box row-h">
+        <span>Redémarrez le serveur pour appliquer les changements d’extensions.</span>
+        <button class="btn glass small" class:danger={armed === 'restart'} onclick={() => confirmed('restart') && act('restart', admin.restart, 'Redémarrage du serveur demandé')}>
+          <Icon path={mdiRestart} size={1.1} /> {armed === 'restart' ? 'Confirmer' : 'Redémarrer'}
+        </button>
+      </p>
+    {/if}
+    <section class="card">
+      <h2>Extensions installées</h2>
+      {#each plugins as p (p.Id + p.Version)}
+        {@const up = update(p)}
+        <div class="line">
+          <div class="lt">
+            <b>{p.Name} <span class="ver">{p.Version}</span></b>
+            {#if p.Description}<span class="hint small clamp2">{p.Description}</span>{/if}
+            <span class="status s-{p.Status}">{PLUGIN_STATUS[p.Status] ?? p.Status}</span>
+          </div>
+          <div class="pl-btns">
+            {#if up}
+              <button class="btn gold small" disabled={busy === `up:${p.Id}`} onclick={() => act(`up:${p.Id}`, () => admin.install(up.pkg, up.version), `${p.Name} ${up.version.version} installée : redémarrez le serveur`)}>
+                <Icon path={mdiUpdate} size={1.1} /> {up.version.version}
+              </button>
+            {/if}
+            {#if p.Status === 'Disabled'}
+              <button class="btn glass small" onclick={() => act(`pl:${p.Id}`, () => admin.enablePlugin(p), `${p.Name} activée`)}>Activer</button>
+            {:else if p.Status === 'Active'}
+              <button class="btn glass small" onclick={() => act(`pl:${p.Id}`, () => admin.disablePlugin(p), `${p.Name} désactivée`)}>Désactiver</button>
+            {/if}
+            {#if p.CanUninstall}
+              <button class="btn glass small" class:danger={armed === `rm:${p.Id}`} onclick={() => confirmed(`rm:${p.Id}`) && act(`rm:${p.Id}`, () => admin.uninstallPlugin(p), `${p.Name} désinstallée : redémarrez le serveur`)}>
+                <Icon path={mdiDeleteOutline} size={1.1} /> {armed === `rm:${p.Id}` ? 'Confirmer' : 'Désinstaller'}
+              </button>
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <p class="hint">Aucune extension installée.</p>
+      {/each}
+      <p class="hint small">Les réglages propres à chaque extension se font dans le tableau de bord de Jellyfin.</p>
+    </section>
+
+    <section class="card">
+      <h2>Catalogue</h2>
+      {#if packages === null}
+        <div class="spinner small"></div>
+      {:else}
+        <input class="input" placeholder="Rechercher une extension…" bind:value={pkgQuery} />
+        {#if categories.length > 1}
+          <div class="chips">
+            <button class="opt" class:on={!pkgCategory} onclick={() => (pkgCategory = '')}>Toutes</button>
+            {#each categories as c (c)}
+              <button class="opt" class:on={pkgCategory === c} onclick={() => (pkgCategory = pkgCategory === c ? '' : c)}>{c}</button>
+            {/each}
+          </div>
+        {/if}
+        {#each catalog as x (x.guid)}
+          <div class="line">
+            <div class="lt">
+              <b>{x.name} <span class="ver">{x.versions[0]?.version ?? ''}</span></b>
+              <span class="hint small clamp2">{x.description || x.overview || ''}</span>
+              <span class="hint small">{[x.category, x.owner, x.versions[0]?.repositoryName].filter(Boolean).join(' · ')}</span>
+            </div>
+            <button class="btn glass small" disabled={!x.versions.length || busy === `inst:${x.guid}`} onclick={() => act(`inst:${x.guid}`, () => admin.install(x), `${x.name} installée : redémarrez le serveur`)}>
+              <Icon path={mdiDownload} size={1.1} /> Installer
+            </button>
+          </div>
+        {:else}
+          <p class="hint">Aucune extension ne correspond.</p>
+        {/each}
+      {/if}
+    </section>
+
+    <section class="card">
+      <h2>Dépôts d’extensions</h2>
+      {#each repos as r, i (r.Url)}
+        <div class="line">
+          <div class="lt"><b>{r.Name}</b><span class="hint small ellipsis">{r.Url}</span></div>
+          <button class="opt" class:on={r.Enabled} onclick={() => saveRepos(repos.map((x, j) => (j === i ? { ...x, Enabled: !x.Enabled } : x)), r.Enabled ? `${r.Name} désactivé` : `${r.Name} activé`)}>{r.Enabled ? 'Activé' : 'Désactivé'}</button>
+          <button class="btn glass small" class:danger={armed === `repo:${r.Url}`} onclick={() => confirmed(`repo:${r.Url}`) && saveRepos(repos.filter((_, j) => j !== i), `${r.Name} retiré`)}>
+            {armed === `repo:${r.Url}` ? 'Confirmer' : 'Retirer'}
+          </button>
+        </div>
+      {/each}
+      <div class="new">
+        <input class="input" placeholder="Nom" bind:value={repoName} />
+        <input class="input" placeholder="https://…/manifest.json" bind:value={repoUrl} />
+        <button class="btn gold" disabled={!repoName.trim() || !/^https?:\/\//.test(repoUrl.trim())}
+          onclick={() => saveRepos([...repos, { Name: repoName.trim(), Url: repoUrl.trim(), Enabled: true }], 'Dépôt ajouté').then(() => { repoName = ''; repoUrl = ''; })}>
+          <Icon path={mdiPlus} size={1.2} /> Ajouter
         </button>
       </div>
     </section>
@@ -343,14 +550,58 @@
       {/each}
     </section>
   {:else if tab === 'log'}
+    <div class="chips sub">
+      <button class="opt" class:on={logView === 'activity'} onclick={() => (logView = 'activity')}>Activité</button>
+      <button class="opt" class:on={logView === 'files'} onclick={() => (logView = 'files')}>Fichiers du serveur</button>
+    </div>
+    {#if logView === 'activity'}
+      <section class="card">
+        <h2>Journal d’activité</h2>
+        {#each log as e (e.Id)}
+          <div class="log {severity(e.Severity)}">
+            <span class="when">{new Date(e.Date).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            <span class="what"><b>{e.Name}</b>{#if e.ShortOverview}<span class="hint small">{e.ShortOverview}</span>{/if}</span>
+          </div>
+        {/each}
+      </section>
+    {:else}
+      <section class="card">
+        <h2>Fichiers de log</h2>
+        {#each logFiles as f (f.Name)}
+          <div class="line">
+            <div class="lt"><b>{f.Name}</b><span class="hint small">{size(f.Size)} · modifié {ago(f.DateModified)}</span></div>
+            <button class="btn glass small" class:gold={logName === f.Name} onclick={() => openLog(f.Name)}><Icon path={mdiFileDocumentOutline} size={1.1} /> Lire</button>
+          </div>
+        {:else}
+          <p class="hint">Aucun fichier de log.</p>
+        {/each}
+        {#if logName}
+          <h3>{logName} <span class="hint small">(fin du fichier)</span></h3>
+          <pre class="logtext">{logText}</pre>
+        {/if}
+      </section>
+    {/if}
+  {:else if tab === 'keys'}
     <section class="card">
-      <h2>Journal d’activité</h2>
-      {#each log as e (e.Id)}
-        <div class="log {severity(e.Severity)}">
-          <span class="when">{new Date(e.Date).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-          <span class="what"><b>{e.Name}</b>{#if e.ShortOverview}<span class="hint small">{e.ShortOverview}</span>{/if}</span>
+      <h2>Clés d’API</h2>
+      <p class="hint">Pour les applis et scripts qui accèdent au serveur sans compte (domotique, outils de téléchargement…). Une clé donne un accès complet : ne la partagez pas.</p>
+      {#each keys as k (k.AccessToken)}
+        <div class="line">
+          <div class="lt"><b>{k.AppName}</b><span class="hint small mono">{k.AccessToken} · créée {ago(k.DateCreated)}</span></div>
+          <button class="ib" title="Copier la clé" onclick={() => copy(k.AccessToken)}><Icon path={mdiContentCopy} size={1.2} /></button>
+          <button class="btn glass small" class:danger={armed === `key:${k.AccessToken}`} onclick={() => confirmed(`key:${k.AccessToken}`) && act(`key:${k.AccessToken}`, () => admin.deleteApiKey(k.AccessToken), `Clé « ${k.AppName} » révoquée`)}>
+            {armed === `key:${k.AccessToken}` ? 'Confirmer' : 'Révoquer'}
+          </button>
         </div>
+      {:else}
+        <p class="hint">Aucune clé.</p>
       {/each}
+      <div class="new two-btn">
+        <input class="input" placeholder="Nom de l’appli (ex. Home Assistant)" bind:value={keyName} />
+        <button class="btn gold" disabled={!keyName.trim() || busy === 'newkey'} onclick={() => act('newkey', async () => { await admin.createApiKey(keyName.trim()); keyName = ''; }, 'Clé créée')}>
+          <Icon path={mdiPlus} size={1.2} /> Créer une clé
+        </button>
+      </div>
     </section>
   {:else if tab === 'settings'}
     {#if config && encoding}
@@ -399,6 +650,25 @@
           {/each}
           <button class="btn gold" disabled={busy === 'encoding'} onclick={saveEncoding}>Enregistrer</button>
         </div>
+
+        {#if network}
+          <div class="card">
+            <h2>Réseau</h2>
+            <dl>
+              <dt>Port HTTP</dt><dd>{network.InternalHttpPort ?? '—'}{network.PublicHttpPort && network.PublicHttpPort !== network.InternalHttpPort ? ` (public ${network.PublicHttpPort})` : ''}</dd>
+              <dt>HTTPS</dt><dd>{network.EnableHttps ? 'activé' : 'désactivé'}</dd>
+              <dt>Accès à distance</dt><dd>{network.EnableRemoteAccess === false ? 'désactivé' : 'autorisé'}</dd>
+              {#if network.BaseUrl}<dt>Chemin de base</dt><dd>{network.BaseUrl}</dd>{/if}
+              {#if network.LocalNetworkSubnets?.length}<dt>Réseau local</dt><dd>{network.LocalNetworkSubnets.join(', ')}</dd>{/if}
+            </dl>
+            <label class="field">
+              <span>Proxys connus</span>
+              <input class="input" bind:value={proxies} placeholder="ex. 172.18.0.2, traefik" />
+              <span class="hint small">Adresses ou noms des reverse proxys (Traefik, nginx…) devant Jellyfin : il peut alors voir la vraie adresse des appareils. Les ports et l’accès à distance se changent dans Jellyfin (une erreur couperait l’accès).</span>
+            </label>
+            <button class="btn gold" disabled={busy === 'network'} onclick={saveNetwork}>Enregistrer</button>
+          </div>
+        {/if}
 
         <div class="card">
           <h2>Apparence de Jellyfin</h2>
@@ -720,6 +990,76 @@
   }
   .sw.on i {
     transform: translateX(1.4rem);
+  }
+  .ver {
+    font-weight: 500;
+    color: var(--text-3);
+    font-size: 0.85rem;
+  }
+  .clamp2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .status {
+    justify-self: start;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.1rem 0.5rem;
+    border-radius: 1rem;
+    color: var(--text-2);
+    background: rgba(255, 255, 255, 0.07);
+  }
+  .status.s-Active {
+    color: #7bd88f;
+    background: rgba(123, 216, 143, 0.12);
+  }
+  .status.s-Restart,
+  .status.s-Deleted {
+    color: var(--gold);
+    background: var(--gold-soft);
+  }
+  .status.s-Malfunctioned,
+  .status.s-NotSupported {
+    color: var(--danger);
+    background: rgba(255, 95, 95, 0.12);
+  }
+  .pl-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: flex-end;
+  }
+  .libs {
+    margin-top: -0.2rem;
+  }
+  .sub {
+    margin-bottom: 1rem;
+  }
+  .mono {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    word-break: break-all;
+  }
+  .logtext {
+    max-height: 60vh;
+    overflow: auto;
+    margin: 0;
+    padding: 0.9rem 1rem;
+    border-radius: 0.5rem;
+    background: #07080a;
+    border: 1px solid var(--line);
+    font: 0.78rem/1.45 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    color: var(--text-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .two-btn {
+    grid-template-columns: 1fr auto;
+  }
+  .warn-box.row-h {
+    margin-bottom: 1rem;
   }
   .spinner.small {
     width: 1.6rem;

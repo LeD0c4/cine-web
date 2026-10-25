@@ -16,6 +16,7 @@
 
   const src = $derived(variant === 'poster' ? posterOf(item, 360) : thumbOf(item, 560));
   const pct = $derived(progress(item));
+  const left = $derived(remaining(item));
   const played = $derived(item.UserData?.Played && item.Type !== 'Series');
   const unplayed = $derived(item.Type === 'Series' ? item.UserData?.UnplayedItemCount : 0);
   let failed = $state(false);
@@ -42,7 +43,9 @@
   {#if variant === 'landscape'}
     <span class="meta">
       <span class="t ellipsis">{cardTitle(item)}</span>
-      <span class="s ellipsis">{play && remaining(item) ? remaining(item) : cardSubtitle(item)}</span>
+      <!-- Épisode : saison, numéro et titre toujours visibles ; le temps restant vient en dessous. -->
+      {#if item.Type === 'Episode' || !(play && left)}<span class="s ellipsis" class:ep={item.Type === 'Episode'}>{cardSubtitle(item)}</span>{/if}
+      {#if play && left}<span class="s r">{left}</span>{/if}
     </span>
   {/if}
 </button>
@@ -215,6 +218,9 @@
   .s {
     font-size: 0.82rem;
     color: var(--text-3);
+  }
+  .s.ep {
+    color: var(--text-2);
   }
   /* Moteurs web anciens (télés) : proportions des vignettes sans « aspect-ratio » */
   @supports not (aspect-ratio: 1 / 1) {

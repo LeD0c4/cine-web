@@ -62,6 +62,44 @@ export type Task = {
 
 export type LogEntry = { Id: number; Name: string; ShortOverview?: string; Date: string; Severity: string; Type: string };
 
+/** Extension installée sur le serveur. */
+export type Plugin = {
+  Id: string;
+  Name: string;
+  Version: string;
+  Description?: string;
+  CanUninstall: boolean;
+  HasImage?: boolean;
+  Status: 'Active' | 'Restart' | 'Deleted' | 'Superceded' | 'Malfunctioned' | 'NotSupported' | 'Disabled' | string;
+};
+
+/** Extension du catalogue (dépôts d'extensions) : noms de champs en minuscules dans l'API. */
+export type Package = {
+  name: string;
+  guid: string;
+  description?: string;
+  overview?: string;
+  owner?: string;
+  category?: string;
+  imageUrl?: string;
+  versions: { version: string; targetAbi?: string; changelog?: string; repositoryName?: string; repositoryUrl?: string }[];
+};
+
+export type Repository = { Name: string; Url: string; Enabled: boolean };
+export type ApiKey = { AccessToken: string; AppName: string; DateCreated: string };
+export type LogFile = { Name: string; Size: number; DateModified: string };
+
+/** « 10.11.2.0 » plus récent que « 10.9.0.0 » (comparaison nombre par nombre). */
+export function newer(a: string, b: string) {
+  const x = a.split('.').map(Number);
+  const y = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return d > 0;
+  }
+  return false;
+}
+
 export const admin = {
   me: () => jf.get<User>('/Users/Me'),
 
@@ -100,6 +138,30 @@ export const admin = {
   saveEncoding: (c: Record<string, any>) => jf.post('/System/Configuration/encoding', c),
   branding: () => jf.get<{ LoginDisclaimer?: string; CustomCss?: string; SplashscreenEnabled?: boolean }>('/System/Configuration/branding'),
   saveBranding: (b: Record<string, unknown>) => jf.post('/System/Configuration/branding', b),
+  network: () => jf.get<Record<string, any>>('/System/Configuration/network'),
+  saveNetwork: (c: Record<string, any>) => jf.post('/System/Configuration/network', c),
+
+  // Extensions
+  plugins: () => jf.get<Plugin[]>('/Plugins'),
+  enablePlugin: (p: Plugin) => jf.post(`/Plugins/${p.Id}/${p.Version}/Enable`),
+  disablePlugin: (p: Plugin) => jf.post(`/Plugins/${p.Id}/${p.Version}/Disable`),
+  uninstallPlugin: (p: Plugin) => jf.request('DELETE', `/Plugins/${p.Id}/${p.Version}`),
+  packages: () => jf.get<Package[]>('/Packages'),
+  install: (pkg: Package, version = pkg.versions[0]) =>
+    jf.post(`/Packages/Installed/${encodeURIComponent(pkg.name)}`, undefined, {
+      assemblyGuid: pkg.guid, version: version?.version, repositoryUrl: version?.repositoryUrl,
+    }),
+  repositories: () => jf.get<Repository[]>('/Repositories'),
+  saveRepositories: (list: Repository[]) => jf.post('/Repositories', list),
+
+  // Clés d'API (applis et scripts qui accèdent au serveur)
+  apiKeys: () => jf.get<{ Items: ApiKey[] }>('/Auth/Keys').then((r) => r.Items),
+  createApiKey: (app: string) => jf.post('/Auth/Keys', undefined, { app }),
+  deleteApiKey: (key: string) => jf.request('DELETE', `/Auth/Keys/${key}`),
+
+  // Journaux du serveur (fichiers)
+  logFiles: () => jf.get<LogFile[]>('/System/Logs'),
+  logFile: (name: string) => jf.get<string>('/System/Logs/Log', { name }),
 };
 
 // ---------- Thème Selvania pour l'interface web de Jellyfin (tableau de bord compris) ----------
