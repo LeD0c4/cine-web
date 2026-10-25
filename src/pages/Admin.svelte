@@ -3,12 +3,15 @@
     mdiServerNetwork, mdiFolderMultipleOutline, mdiAccountMultipleOutline, mdiDevices, mdiTimerCogOutline,
     mdiTextBoxOutline, mdiTuneVariant, mdiRefresh, mdiStop, mdiPlay, mdiMessageTextOutline, mdiRestart,
     mdiAccountPlusOutline, mdiDeleteOutline, mdiKeyOutline, mdiPalette, mdiPuzzleOutline, mdiKeyChainVariant,
-    mdiDownload, mdiUpdate, mdiPlus, mdiContentCopy, mdiFileDocumentOutline,
+    mdiDownload, mdiUpdate, mdiPlus, mdiContentCopy, mdiFileDocumentOutline, mdiAlertCircleOutline, mdiPencilOutline,
   } from '@mdi/js';
+  import ItemAdmin from '../components/ItemAdmin.svelte';
+  import { router, links } from '../lib/router.svelte';
+  import { posterOf, type Item } from '../lib/jellyfin';
   import {
     admin, withTheme, hasTheme, newer,
     type ServerInfo, type Session, type Library, type User, type Device, type Task, type LogEntry,
-    type Plugin, type Package, type Repository, type ApiKey, type LogFile,
+    type Plugin, type Package, type Repository, type ApiKey, type LogFile, type Incomplete,
   } from '../lib/admin';
   import { session } from '../lib/session.svelte';
   import { TICKS } from '../lib/jellyfin';
@@ -16,10 +19,11 @@
   import { handle } from '../lib/errors';
   import Icon from '../components/Icon.svelte';
 
-  type Tab = 'server' | 'libraries' | 'users' | 'plugins' | 'devices' | 'tasks' | 'log' | 'keys' | 'settings';
+  type Tab = 'server' | 'libraries' | 'incomplete' | 'users' | 'plugins' | 'devices' | 'tasks' | 'log' | 'keys' | 'settings';
   const TABS: { id: Tab; label: string; icon: string }[] = [
     { id: 'server', label: 'Serveur', icon: mdiServerNetwork },
     { id: 'libraries', label: 'Médiathèques', icon: mdiFolderMultipleOutline },
+    { id: 'incomplete', label: 'À compléter', icon: mdiAlertCircleOutline },
     { id: 'users', label: 'Utilisateurs', icon: mdiAccountMultipleOutline },
     { id: 'plugins', label: 'Extensions', icon: mdiPuzzleOutline },
     { id: 'devices', label: 'Appareils', icon: mdiDevices },
@@ -82,12 +86,14 @@
   let repos = $state<Repository[]>([]);
   let keys = $state<ApiKey[]>([]);
   let logFiles = $state<LogFile[]>([]);
+  let incomplete = $state<Incomplete[] | null>(null);
 
   async function load() {
     try {
       if (tab === 'server') [info, sessions] = await Promise.all([admin.info(), admin.sessions()]);
       else if (tab === 'libraries') [libraries, counts] = await Promise.all([admin.libraries(), admin.counts()]);
       else if (tab === 'users') [users, libraries] = await Promise.all([admin.users(), admin.libraries()]);
+      else if (tab === 'incomplete') incomplete = await admin.incomplete();
       else if (tab === 'plugins') {
         [plugins, repos, info] = await Promise.all([admin.plugins(), admin.repositories(), admin.info()]);
         // Le catalogue (tous les dépôts) est long à lire : une fois par visite de l'onglet.
@@ -151,6 +157,26 @@
     const list = folders(u);
     const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
     await act(`${u.Id}:folders`, () => admin.setPolicy(u.Id, { ...u.Policy, EnableAllFolders: false, EnabledFolders: next }));
+  }
+
+  // ---------- À compléter ----------
+  let incFilter = $state('');
+  let fixing = $state<Item | null>(null);
+  let retry = $state<{ done: number; total: number } | null>(null);
+  const shown = $derived((incomplete ?? []).filter((e) => !incFilter || e.reasons.includes(incFilter)));
+  const TYPE: Record<string, string> = { Movie: 'Film', Series: 'Série', BoxSet: 'Collection' };
+  const fileName = (path?: string) => path?.split(/[\\/]/).filter(Boolean).pop() ?? '';
+  /** Nouvelle tentative d'identification pour tout ce qui est affiché (compléter sans rien écraser). */
+  async function retryAll() {
+    const list = shown.map((e) => e.item.Id);
+    retry = { done: 0, total: list.length };
+    for (const id of list) {
+      await admin.refresh(id, false).catch(() => {});
+      retry = { done: retry.done + 1, total: list.length };
+    }
+    flash(`Identification relancée pour ${list.length} titre${list.length > 1 ? 's' : ''} : la liste se met à jour dans quelques minutes.`);
+    retry = null;
+    setTimeout(load, 15000);
   }
 
   // ---------- Extensions ----------
@@ -272,6 +298,10 @@
       </button>
     {/each}
   </nav>
+
+  {#if fixing}
+    <ItemAdmin item={fixing} onclose={() => { fixing = null; load(); }} onchanged={() => {}} />
+  {/if}
 
   {#if error}<p class="msg err">{error}</p>{/if}
   {#if notice}<p class="msg ok">{notice}</p>{/if}
@@ -415,6 +445,45 @@
           <Icon path={mdiAccountPlusOutline} size={1.2} /> Créer
         </button>
       </div>
+    </section>
+  {:else if tab === 'incomplete'}
+    <section class="card">
+      <div class="row-h">
+        <h2>À compléter</h2>
+        {#if shown.length}
+          <button class="btn glass" disabled={!!retry} onclick={retryAll}>
+            <Icon path={mdiRefresh} size={1.2} /> {retry ? `Relance… ${retry.done} / ${retry.total}` : `Relancer l’identification (${shown.length})`}
+          </button>
+        {/if}
+      </div>
+      <p class="hint">Les films et séries que Jellyfin n’a pas reconnus, ou sans résumé. « Corriger » ouvre l’identification : cherchez le bon titre et appliquez-le.</p>
+      {#if incomplete === null}
+        <div class="spinner small"></div>
+      {:else if !incomplete.length}
+        <p class="hint">Tout est complet : chaque film et chaque série a ses informations.</p>
+      {:else}
+        <div class="chips">
+          {#each [['', 'Tout'], ['Non identifié', 'Non identifiés'], ['Sans résumé', 'Sans résumé'], ['Sans affiche', 'Sans affiche']] as [value, label] (value)}
+            {@const n = value ? incomplete.filter((e) => e.reasons.includes(value)).length : incomplete.length}
+            {#if n}<button class="opt" class:on={incFilter === value} onclick={() => (incFilter = value)}>{label} · {n}</button>{/if}
+          {/each}
+        </div>
+        {#each shown as e (e.item.Id)}
+          {@const poster = posterOf(e.item, 120)}
+          <div class="line inc">
+            {#if poster}<img class="poster" src={poster} alt="" loading="lazy" />{:else}<span class="poster none"></span>{/if}
+            <div class="lt">
+              <b class="ellipsis">{e.item.Name}{e.item.ProductionYear ? ` (${e.item.ProductionYear})` : ''}</b>
+              <span class="hint small">{TYPE[e.item.Type] ?? e.item.Type}{fileName(e.item.Path) ? ` · ${fileName(e.item.Path)}` : ''}</span>
+              <span class="reasons">{#each e.reasons as r (r)}<span class="status s-reason">{r}</span>{/each}</span>
+            </div>
+            <div class="pl-btns">
+              <button class="btn gold small" onclick={() => (fixing = e.item)}><Icon path={mdiPencilOutline} size={1.1} /> Corriger</button>
+              <button class="btn glass small" onclick={() => router.go(links.item(e.item.Id))}>Fiche</button>
+            </div>
+          </div>
+        {/each}
+      {/if}
     </section>
   {:else if tab === 'plugins'}
     {#if info?.HasPendingRestart}
@@ -708,13 +777,12 @@
     font-size: 1.05rem;
     margin: 1.2rem 0 0.2rem;
   }
+  /* Onglets : à la ligne quand il n'y a pas la place (pas de défilement caché qui rognerait le focus) */
   .tabs {
     display: flex;
-    gap: 0.4rem;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    gap: 0.45rem;
     margin-bottom: 1.4rem;
-    padding: 0.2rem;
   }
   .tab {
     flex: none;
@@ -1031,6 +1099,26 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     justify-content: flex-end;
+  }
+  .inc {
+    align-items: center;
+  }
+  .poster {
+    flex: none;
+    width: 3rem;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: 0.3rem;
+    background: var(--surface);
+  }
+  .reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .status.s-reason {
+    color: var(--gold);
+    background: var(--gold-soft);
   }
   .libs {
     margin-top: -0.2rem;

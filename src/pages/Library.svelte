@@ -2,6 +2,7 @@
   import { jf, type Item } from '../lib/jellyfin';
   import { handle } from '../lib/errors';
   import Card from '../components/Card.svelte';
+  import ChipWrap from '../components/ChipWrap.svelte';
 
   let { kind }: { kind: 'Movie' | 'Series' | 'Favorites' } = $props();
 
@@ -103,11 +104,13 @@
     </div>
   </div>
   {#if genres.length > 1}
-    <div class="genres" data-row>
-      <button class="g" class:on={!genre} onclick={() => (genre = '')}>Tous</button>
-      {#each genres as g (g)}
-        <button class="g" class:on={genre === g} onclick={() => (genre = genre === g ? '' : g)}>{g}</button>
-      {/each}
+    <div class="genres">
+      <ChipWrap selected={genre}>
+        <button class="g" class:on={!genre} onclick={() => (genre = '')}>Tous</button>
+        {#each genres as g (g)}
+          <button class="g" class:on={genre === g} onclick={() => (genre = genre === g ? '' : g)}>{g}</button>
+        {/each}
+      </ChipWrap>
     </div>
   {/if}
 
@@ -168,10 +171,6 @@
     font-weight: 600;
   }
   .genres {
-    display: flex;
-    gap: 0.4rem;
-    overflow-x: auto;
-    scrollbar-width: none;
     padding: 0.2rem 0 1.4rem;
   }
   .g.on {

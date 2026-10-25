@@ -1,4 +1,4 @@
-import { jf } from './jellyfin';
+import { jf, type Item } from './jellyfin';
 
 // Administration du serveur Jellyfin (comptes administrateurs uniquement).
 
@@ -201,7 +201,35 @@ export const admin = {
     jf.get<{ Images: RemoteImage[] }>(`/Items/${itemId}/RemoteImages`, { type, includeAllLanguages: true, limit: 60 }).then((r) => r.Images),
   downloadImage: (itemId: string, type: ImageKind, url: string) =>
     jf.post(`/Items/${itemId}/RemoteImages/Download`, undefined, { type, imageUrl: url }),
+
+  /**
+   * Films, séries et collections à compléter : non identifiés (aucun identifiant TMDb / IMDb / TVDB)
+   * ou sans résumé. Les filtres sont faits par le serveur ; les raisons sont regroupées par titre.
+   */
+  async incomplete(): Promise<Incomplete[]> {
+    const fields = 'ProviderIds,Overview,Path,ProductionYear';
+    const query = (extra: Record<string, unknown>) =>
+      jf.get<{ Items: Item[] }>('/Items', { userId: jf.userId, recursive: true, fields, sortBy: 'SortName', ...extra }).then((r) => r.Items);
+    const [movies, series, boxsets, noOverview] = await Promise.all([
+      query({ includeItemTypes: 'Movie', hasImdbId: false, hasTmdbId: false }),
+      query({ includeItemTypes: 'Series', hasTvdbId: false, hasTmdbId: false, hasImdbId: false }),
+      query({ includeItemTypes: 'BoxSet', hasTmdbId: false }),
+      query({ includeItemTypes: 'Movie,Series', hasOverview: false }),
+    ]);
+    const byId = new Map<string, Incomplete>();
+    const add = (it: Item, reason: string) => {
+      const entry = byId.get(it.Id) ?? { item: it, reasons: [] };
+      if (!entry.reasons.includes(reason)) entry.reasons.push(reason);
+      byId.set(it.Id, entry);
+    };
+    for (const it of [...movies, ...series, ...boxsets]) add(it, 'Non identifié');
+    for (const it of noOverview) add(it, 'Sans résumé');
+    for (const e of byId.values()) if (!e.item.ImageTags?.Primary) e.reasons.push('Sans affiche');
+    return [...byId.values()].sort((a, b) => a.item.Name.localeCompare(b.item.Name));
+  },
 };
+
+export type Incomplete = { item: Item; reasons: string[] };
 
 // ---------- Thème Selvania pour l'interface web de Jellyfin (tableau de bord compris) ----------
 
