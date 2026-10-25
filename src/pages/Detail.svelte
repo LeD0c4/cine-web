@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { mdiPlay, mdiPlus, mdiCheck, mdiEyeOutline, mdiEyeCheck, mdiRestart, mdiYoutube, mdiCast } from '@mdi/js';
+  import { mdiPlay, mdiPlus, mdiCheck, mdiEyeOutline, mdiEyeCheck, mdiRestart, mdiYoutube, mdiCast, mdiPencilOutline } from '@mdi/js';
   import CastPicker from '../components/CastPicker.svelte';
+  import ItemAdmin from '../components/ItemAdmin.svelte';
+  import { session } from '../lib/session.svelte';
   import { jf, backdropOf, logoOf, posterOf, thumbOf, personImage, type Item } from '../lib/jellyfin';
   import { duration, years, progress, quality, episodeCode, remaining } from '../lib/format';
   import { router, links } from '../lib/router.svelte';
@@ -21,6 +23,8 @@
   let error = $state('');
   let logoFailed = $state(false);
   let casting = $state(false);
+  /** Gestion du titre (identifier, infos, images) : comptes administrateurs. */
+  let managing = $state(false);
 
   async function load() {
     try {
@@ -145,6 +149,9 @@
           {#if trailer && !TV}
             <a class="round" href={trailer.Url} target="_blank" rel="noreferrer" title="Bande-annonce"><Icon path={mdiYoutube} size={1.4} /></a>
           {/if}
+          {#if session.isAdmin}
+            <button class="round" onclick={() => (managing = true)} title="Gérer ce titre (identifier, infos, images)"><Icon path={mdiPencilOutline} size={1.3} /></button>
+          {/if}
         </div>
         {#if resumeTicks > 0 && next?.RunTimeTicks}
           <div class="resume">
@@ -227,6 +234,7 @@
     {/if}
   </article>
   {#if casting && next}<CastPicker item={next} onclose={() => (casting = false)} />{/if}
+  {#if managing && item}<ItemAdmin {item} onclose={() => (managing = false)} onchanged={load} />{/if}
 {/if}
 
 <style>

@@ -89,6 +89,19 @@ export type Repository = { Name: string; Url: string; Enabled: boolean };
 export type ApiKey = { AccessToken: string; AppName: string; DateCreated: string };
 export type LogFile = { Name: string; Size: number; DateModified: string };
 
+/** Résultat de « Identifier » (TMDb, IMDb…). */
+export type RemoteResult = {
+  Name: string;
+  ProductionYear?: number;
+  PremiereDate?: string;
+  ImageUrl?: string;
+  Overview?: string;
+  SearchProviderName?: string;
+  ProviderIds?: Record<string, string>;
+};
+export type RemoteImage = { Url: string; ThumbnailUrl?: string; ProviderName?: string; Width?: number; Height?: number; Language?: string; CommunityRating?: number };
+export type ImageKind = 'Primary' | 'Backdrop' | 'Logo' | 'Thumb';
+
 /** « 10.11.2.0 » plus récent que « 10.9.0.0 » (comparaison nombre par nombre). */
 export function newer(a: string, b: string) {
   const x = a.split('.').map(Number);
@@ -162,6 +175,32 @@ export const admin = {
   // Journaux du serveur (fichiers)
   logFiles: () => jf.get<LogFile[]>('/System/Logs'),
   logFile: (name: string) => jf.get<string>('/System/Logs/Log', { name }),
+
+  // Fiche d'un titre : identifier, modifier, images, actualiser
+  /** Recherche chez les fournisseurs de métadonnées (type : Movie, Series, BoxSet…). */
+  identify: (itemId: string, type: string, name: string, year?: number, providerIds: Record<string, string> = {}) =>
+    jf.post<RemoteResult[]>(`/Items/RemoteSearch/${type}`, {
+      SearchInfo: { Name: name, Year: year || undefined, ProviderIds: providerIds },
+      ItemId: itemId,
+      IncludeDisabledProviders: false,
+    }),
+  /** Applique le résultat choisi ; le serveur relit ensuite toute la fiche (quelques secondes). */
+  applyIdentity: (itemId: string, result: RemoteResult) =>
+    jf.post(`/Items/RemoteSearch/Apply/${itemId}`, result, { replaceAllImages: true }),
+  refresh: (itemId: string, replaceAll: boolean) =>
+    jf.post(`/Items/${itemId}/Refresh`, undefined, {
+      Recursive: true,
+      MetadataRefreshMode: 'FullRefresh',
+      ImageRefreshMode: 'FullRefresh',
+      ReplaceAllMetadata: replaceAll,
+      ReplaceAllImages: replaceAll,
+    }),
+  /** La fiche complète est renvoyée telle quelle avec les champs modifiés (comme le tableau de bord de Jellyfin). */
+  updateItem: (itemId: string, dto: Record<string, unknown>) => jf.post(`/Items/${itemId}`, dto),
+  remoteImages: (itemId: string, type: ImageKind) =>
+    jf.get<{ Images: RemoteImage[] }>(`/Items/${itemId}/RemoteImages`, { type, includeAllLanguages: true, limit: 60 }).then((r) => r.Images),
+  downloadImage: (itemId: string, type: ImageKind, url: string) =>
+    jf.post(`/Items/${itemId}/RemoteImages/Download`, undefined, { type, imageUrl: url }),
 };
 
 // ---------- Thème Selvania pour l'interface web de Jellyfin (tableau de bord compris) ----------

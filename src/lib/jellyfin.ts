@@ -88,6 +88,7 @@ export type Item = {
   IndexNumber?: number;
   ParentIndexNumber?: number;
   ProductionYear?: number;
+  ProviderIds?: Record<string, string>;
   EndDate?: string;
   PremiereDate?: string;
   Status?: string;

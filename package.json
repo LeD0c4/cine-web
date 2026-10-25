@@ -1,6 +1,6 @@
 {
   "name": "cine-web",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "type": "module",
   "description": "SÃ©lvania CinÃ© â€” interface Jellyfin faÃ§on Netflix, aux couleurs or et graphite",
