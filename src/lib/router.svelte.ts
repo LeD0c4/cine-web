@@ -4,6 +4,7 @@
 export type Route =
   | { name: 'home' }
   | { name: 'movies' }
+  | { name: 'collections' }
   | { name: 'series' }
   | { name: 'list' }
   | { name: 'settings' }
@@ -18,7 +19,7 @@ function parse(): Route {
   const parts = path.split('/').filter(Boolean);
   switch (parts[0]) {
     case 'films':
-      return { name: 'movies' };
+      return parts[1] === 'collections' ? { name: 'collections' } : { name: 'movies' };
     case 'series':
       return { name: 'series' };
     case 'ma-liste':

@@ -32,7 +32,7 @@
   <button class="logo" onclick={() => router.go('/')} aria-label="Accueil"><Brand size={0.95} /></button>
   <nav>
     {#each LINKS as l (l.path)}
-      <a href="#{l.path}" class:on={router.route.name === l.name} onclick={(e) => { e.preventDefault(); router.go(l.path); }}>{l.label}</a>
+      <a href="#{l.path}" class:on={router.route.name === l.name || (l.name === 'movies' && router.route.name === 'collections')} onclick={(e) => { e.preventDefault(); router.go(l.path); }}>{l.label}</a>
     {/each}
   </nav>
   <div class="spacer"></div>

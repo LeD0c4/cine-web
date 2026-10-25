@@ -1,12 +1,16 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+  import { mdiMovieOpenOutline, mdiMovieRoll } from '@mdi/js';
   import { jf, type Item } from '../lib/jellyfin';
   import { handle } from '../lib/errors';
+  import { router } from '../lib/router.svelte';
+  import Icon from '../components/Icon.svelte';
   import Card from '../components/Card.svelte';
   import ChipWrap from '../components/ChipWrap.svelte';
 
-  let { kind }: { kind: 'Movie' | 'Series' | 'Favorites' } = $props();
+  let { kind }: { kind: 'Movie' | 'BoxSet' | 'Series' | 'Favorites' } = $props();
 
-  const TITLES = { Movie: 'Films', Series: 'Séries', Favorites: 'Ma liste' };
+  const TITLES = { Movie: 'Films', BoxSet: 'Films', Series: 'Séries', Favorites: 'Ma liste' };
   const SORTS = [
     { id: 'recent', label: 'Ajouts récents', sortBy: 'DateCreated,SortName', order: 'Descending' },
     { id: 'title', label: 'Titre', sortBy: 'SortName', order: 'Ascending' },
@@ -20,6 +24,8 @@
   let genre = $state('');
   let unwatched = $state(false);
   let genres = $state<string[]>([]);
+  /** Le serveur a des collections (sinon le bouton « Collections » ne sert à rien). */
+  let hasCollections = $state(untrack(() => kind === 'BoxSet'));
   let items = $state<Item[]>([]);
   let total = $state(0);
   let loading = $state(false);
@@ -27,7 +33,8 @@
   let sentinel: HTMLDivElement;
   let gen = 0;
 
-  const types = $derived(kind === 'Favorites' ? 'Movie,Series' : kind);
+  const types = $derived(kind === 'Favorites' ? 'Movie,Series,BoxSet' : kind);
+  const noun = $derived(kind === 'BoxSet' ? 'collection' : 'titre');
 
   function query(start: number) {
     const s = SORTS.find((x) => x.id === sort)!;
@@ -85,6 +92,13 @@
   });
 
   $effect(() => {
+    if (kind !== 'Movie') return;
+    jf.items({ includeItemTypes: 'BoxSet', limit: 1 })
+      .then((r) => (hasCollections = r.TotalRecordCount > 0))
+      .catch(() => {});
+  });
+
+  $effect(() => {
     const io = new IntersectionObserver((e) => e[0].isIntersecting && more(), { rootMargin: '800px' });
     io.observe(sentinel);
     return () => io.disconnect();
@@ -94,7 +108,13 @@
 <div class="library fade-in">
   <div class="top">
     <h1>{TITLES[kind]}</h1>
-    {#if total}<span class="count">{total} titre{total > 1 ? 's' : ''}</span>{/if}
+    {#if hasCollections}
+      <div class="views">
+        <button class="view" class:on={kind === 'Movie'} onclick={() => router.go('/films')}><Icon path={mdiMovieOpenOutline} size={1.2} /> Tous</button>
+        <button class="view" class:on={kind === 'BoxSet'} onclick={() => router.go('/films/collections')}><Icon path={mdiMovieRoll} size={1.2} /> Collections</button>
+      </div>
+    {/if}
+    {#if total}<span class="count">{total} {noun}{total > 1 ? 's' : ''}</span>{/if}
     <div class="spacer"></div>
     <div class="sorts">
       {#each SORTS as s (s.id)}
@@ -117,7 +137,13 @@
   {#if error}
     <p class="error">{error}</p>
   {:else if !loading && !items.length}
-    <p class="empty">{kind === 'Favorites' ? 'Votre liste est vide : ajoutez des titres avec le bouton +.' : 'Aucun titre.'}</p>
+    <p class="empty">
+      {kind === 'Favorites'
+        ? 'Votre liste est vide : ajoutez des titres avec le bouton +.'
+        : kind === 'BoxSet'
+          ? 'Aucune collection pour l’instant.'
+          : 'Aucun titre.'}
+    </p>
   {/if}
   <div class="grid">
     {#each items as it (it.Id)}
@@ -146,6 +172,27 @@
   }
   .count {
     color: var(--text-3);
+  }
+  /* Films : tous les films ou les collections (sagas) */
+  .views {
+    display: flex;
+    padding: 0.2rem;
+    border-radius: 2rem;
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .view {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.95rem;
+    border-radius: 2rem;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .view.on {
+    color: #1b1104;
+    background: var(--gold-grad);
   }
   .spacer {
     flex: 1;

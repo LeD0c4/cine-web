@@ -6,7 +6,7 @@
   import { jf, backdropOf, logoOf, posterOf, thumbOf, personImage, type Item } from '../lib/jellyfin';
   import { duration, years, progress, quality, episodeCode, remaining } from '../lib/format';
   import { router, links } from '../lib/router.svelte';
-  import { playTarget } from '../lib/play';
+  import { playTarget, collectionItems, collectionNext } from '../lib/play';
   import { handle } from '../lib/errors';
   import { TV } from '../lib/tv';
   import Icon from '../components/Icon.svelte';
@@ -20,6 +20,8 @@
   let seasonId = $state('');
   let episodes = $state<Item[]>([]);
   let similar = $state<Item[]>([]);
+  /** Collection : ses films, dans l'ordre de sortie. */
+  let films = $state<Item[]>([]);
   let error = $state('');
   let logoFailed = $state(false);
   let casting = $state(false);
@@ -35,8 +37,10 @@
         return;
       }
       item = it;
-      const tasks: Promise<unknown>[] = [jf.similar(id, 16).then((s) => (similar = s)).catch(() => {})];
-      if (it.Type === 'Series') {
+      const tasks: Promise<unknown>[] = it.Type === 'BoxSet' ? [] : [jf.similar(id, 16).then((s) => (similar = s)).catch(() => {})];
+      if (it.Type === 'BoxSet') {
+        tasks.push(loadFilms(id));
+      } else if (it.Type === 'Series') {
         tasks.push(
           (async () => {
             const [ss, nx] = await Promise.all([jf.seasons(id), playTarget(it)]);
@@ -55,6 +59,21 @@
   }
   $effect(() => {
     load();
+  });
+
+  async function loadFilms(boxId: string) {
+    films = await collectionItems(boxId);
+    next = await collectionNext(films);
+  }
+  const filmCount = $derived(
+    `${films.length} ${films.every((f) => f.Type === 'Movie') ? 'film' : 'titre'}${films.length > 1 ? 's' : ''}`,
+  );
+  /** Années couvertes par la collection (du premier au dernier film). */
+  const filmYears = $derived.by(() => {
+    const ys = films.map((f) => f.ProductionYear).filter((y): y is number => !!y);
+    if (!ys.length) return '';
+    const [a, b] = [Math.min(...ys), Math.max(...ys)];
+    return a === b ? String(a) : `${a} – ${b}`;
   });
 
   $effect(() => {
@@ -93,22 +112,46 @@
       next = await playTarget(item);
       if (seasonId) episodes = await jf.episodes(item.Id, seasonId);
     }
+    if (item.Type === 'BoxSet') await loadFilms(item.Id);
   }
   async function toggleEpisode(ep: Item, e: Event) {
     e.stopPropagation();
     const on = !ep.UserData?.Played;
     await jf.setPlayed(ep.Id, on);
     ep.UserData = { ...ep.UserData, Played: on, PlaybackPositionTicks: 0, PlayedPercentage: 0 };
-    if (item) next = await playTarget(item);
+    if (item) next = item.Type === 'BoxSet' ? await collectionNext(films) : await playTarget(item);
   }
 </script>
+
+<!-- Épisode (sa lecture) ou film d'une collection (sa fiche) -->
+{#snippet entry(ep: Item, num: number | undefined, aside: string, onopen: () => void)}
+  {@const th = thumbOf(ep, 480)}
+  {@const pct = progress(ep)}
+  <li>
+    <button class="ep" class:current={ep.Id === next?.Id} onclick={onopen}>
+      <span class="num">{num ?? ''}</span>
+      <span class="thumb">
+        {#if th}<img src={th} alt="" loading="lazy" />{/if}
+        {#if ep.Type === 'Episode'}<span class="pi"><Icon path={mdiPlay} size={2} /></span>{/if}
+        {#if pct > 0 && pct < 100}<span class="bar"><span style:width="{pct}%"></span></span>{/if}
+      </span>
+      <span class="txt">
+        <span class="row1"><b class="ellipsis">{ep.Name}</b><span class="dur">{aside}</span></span>
+        {#if ep.Overview}<span class="ov">{ep.Overview}</span>{/if}
+      </span>
+    </button>
+    <button class="seen" class:on={ep.UserData?.Played} onclick={(e) => toggleEpisode(ep, e)} title={ep.UserData?.Played ? 'Vu' : 'Marquer comme vu'}>
+      <Icon path={ep.UserData?.Played ? mdiCheck : mdiEyeOutline} size={1.2} />
+    </button>
+  </li>
+{/snippet}
 
 {#if error}
   <p class="error">{error}</p>
 {:else if !item}
   <div class="loading"><div class="spinner"></div></div>
 {:else}
-  {@const bd = backdropOf(item, 1920)}
+  {@const bd = backdropOf(item, 1920) ?? (item.Type === 'BoxSet' && films[0] ? backdropOf(films[0], 1920) : null)}
   {@const logo = logoOf(item)}
   <article class="detail fade-in">
     <header class="hero">
@@ -122,7 +165,10 @@
         {/if}
         <p class="meta">
           {#if item.CommunityRating}<span class="score">★ {item.CommunityRating.toFixed(1)}</span>{/if}
-          {#if years(item)}<span>{years(item)}</span>{/if}
+          {#if item.Type === 'BoxSet'}
+            {#if filmYears}<span>{filmYears}</span>{/if}
+            {#if films.length}<span>{filmCount}</span>{/if}
+          {:else if years(item)}<span>{years(item)}</span>{/if}
           {#if item.OfficialRating}<span class="chip">{item.OfficialRating}</span>{/if}
           {#if item.Type === 'Movie' && item.RunTimeTicks}<span>{duration(item.RunTimeTicks)}</span>{/if}
           {#if item.Type === 'Series' && seasons.length}<span>{seasons.length} saison{seasons.length > 1 ? 's' : ''}</span>{/if}
@@ -166,6 +212,8 @@
       <div class="left">
         {#if item.Type === 'Series' && next && next.Overview}
           <h3 class="ep-title"><span>À suivre</span> {episodeCode(next)} — {next.Name}</h3>
+        {:else if item.Type === 'BoxSet' && next && films.length > 1}
+          <h3 class="ep-title"><span>À suivre</span> {next.Name}{next.ProductionYear ? ` (${next.ProductionYear})` : ''}</h3>
         {/if}
         <p class="overview">{item.Overview ?? ''}</p>
       </div>
@@ -187,27 +235,20 @@
         </div>
         <ol>
           {#each episodes as ep (ep.Id)}
-            {@const th = thumbOf(ep, 480)}
-            {@const pct = progress(ep)}
-            <li>
-              <button class="ep" class:current={ep.Id === next?.Id} onclick={() => router.go(links.play(ep.Id))}>
-                <span class="num">{ep.IndexNumber ?? ''}</span>
-                <span class="thumb">
-                  {#if th}<img src={th} alt="" loading="lazy" />{/if}
-                  <span class="pi"><Icon path={mdiPlay} size={2} /></span>
-                  {#if pct > 0 && pct < 100}<span class="bar"><span style:width="{pct}%"></span></span>{/if}
-                </span>
-                <span class="txt">
-                  <span class="row1"><b class="ellipsis">{ep.Name}</b><span class="dur">{duration(ep.RunTimeTicks)}</span></span>
-                  {#if ep.Overview}<span class="ov">{ep.Overview}</span>{/if}
-                </span>
-              </button>
-              <button class="seen" class:on={ep.UserData?.Played} onclick={(e) => toggleEpisode(ep, e)} title={ep.UserData?.Played ? 'Vu' : 'Marquer comme vu'}>
-                <Icon path={ep.UserData?.Played ? mdiCheck : mdiEyeOutline} size={1.2} />
-              </button>
-            </li>
+            {@render entry(ep, ep.IndexNumber, duration(ep.RunTimeTicks), () => router.go(links.play(ep.Id)))}
           {:else}
             <li class="empty">Chargement des épisodes…</li>
+          {/each}
+        </ol>
+      </section>
+    {/if}
+
+    {#if item.Type === 'BoxSet' && films.length}
+      <section class="episodes films">
+        <h2>{filmCount} dans la collection</h2>
+        <ol>
+          {#each films as f, i (f.Id)}
+            {@render entry(f, i + 1, [f.ProductionYear, duration(f.RunTimeTicks)].filter(Boolean).join(' · '), () => router.go(links.item(f.Id)))}
           {/each}
         </ol>
       </section>
@@ -398,6 +439,12 @@
   .episodes {
     padding: 0 var(--pad) 2rem;
   }
+  .films h2 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    padding: 0 0.6rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+  }
   .seasons {
     display: flex;
     gap: 0.5rem;
@@ -494,8 +541,10 @@
   .ep:focus .pi {
     opacity: 1;
   }
+  /* Colonne bornée : un titre ou un résumé long ne déborde jamais sous le bouton « vu » */
   .txt {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.4rem;
     min-width: 0;
   }
@@ -503,6 +552,9 @@
     display: flex;
     justify-content: space-between;
     gap: 1rem;
+  }
+  .row1 b {
+    min-width: 0;
   }
   .dur {
     flex: none;
@@ -608,6 +660,18 @@
     }
     .num {
       display: none;
+    }
+    /* Titre sur toute la largeur, année et durée en dessous */
+    .row1 {
+      flex-direction: column;
+      gap: 0.1rem;
+    }
+    .dur {
+      font-size: 0.85rem;
+    }
+    .ov {
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
     }
   }
 </style>

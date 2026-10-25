@@ -384,6 +384,21 @@
               <div class="bar"><span style:width="{l.RefreshProgress}%"></span></div>
             {/if}
           </div>
+          {#if l.CollectionType === 'movies' && l.LibraryOptions}
+            {@const auto = !!l.LibraryOptions.AutomaticallyAddToCollection}
+            <button
+              class="opt"
+              class:on={auto}
+              disabled={busy === `coll:${l.ItemId}`}
+              title="Regroupe les films d’une même saga dans une collection (dès 2 films)"
+              onclick={() =>
+                act(
+                  `coll:${l.ItemId}`,
+                  () => admin.setLibraryOptions(l.ItemId, { ...l.LibraryOptions, AutomaticallyAddToCollection: !auto }),
+                  auto ? 'Collections automatiques désactivées' : 'Collections automatiques activées : lancez « Analyser » pour regrouper les films déjà présents',
+                )}
+            >Collections auto</button>
+          {/if}
           <button class="btn glass small" disabled={busy === `scan:${l.ItemId}`} onclick={() => act(`scan:${l.ItemId}`, () => admin.scan(l.ItemId), `Analyse de « ${l.Name} » lancée`)}>
             <Icon path={mdiRefresh} size={1.1} /> Analyser
           </button>

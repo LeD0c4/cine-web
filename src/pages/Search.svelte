@@ -27,7 +27,7 @@
       }
       loading = true;
       try {
-        const r = await jf.items({ searchTerm: term, includeItemTypes: 'Movie,Series', limit: 60, sortBy: 'SortName' });
+        const r = await jf.items({ searchTerm: term, includeItemTypes: 'Movie,Series,BoxSet', limit: 60, sortBy: 'SortName' });
         if (term === text.trim()) results = r.Items;
         error = '';
       } catch (err) {

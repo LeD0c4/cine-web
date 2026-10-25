@@ -30,6 +30,7 @@ export type Library = {
   Locations: string[];
   RefreshProgress?: number;
   RefreshStatus?: string;
+  LibraryOptions?: Record<string, unknown> & { AutomaticallyAddToCollection?: boolean };
 };
 
 export type Policy = Record<string, unknown> & {
@@ -125,6 +126,9 @@ export const admin = {
   libraries: () => jf.get<Library[]>('/Library/VirtualFolders'),
   counts: () => jf.get<{ MovieCount: number; SeriesCount: number; EpisodeCount: number }>('/Items/Counts'),
   scanAll: () => jf.post('/Library/Refresh'),
+  /** Remplace les options d'une médiathèque (on renvoie toutes les options lues, une seule modifiée). */
+  setLibraryOptions: (itemId: string, options: Record<string, unknown>) =>
+    jf.post('/Library/VirtualFolders/LibraryOptions', { Id: itemId, LibraryOptions: options }),
   scan: (itemId: string) =>
     jf.post(`/Items/${itemId}/Refresh`, undefined, {
       Recursive: true, MetadataRefreshMode: 'Default', ImageRefreshMode: 'Default', ReplaceAllMetadata: false, ReplaceAllImages: false,

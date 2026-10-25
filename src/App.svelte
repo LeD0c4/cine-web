@@ -50,6 +50,8 @@
       <Home />
     {:else if route.name === 'movies'}
       {#key 'movies'}<Library kind="Movie" />{/key}
+    {:else if route.name === 'collections'}
+      {#key 'collections'}<Library kind="BoxSet" />{/key}
     {:else if route.name === 'series'}
       {#key 'series'}<Library kind="Series" />{/key}
     {:else if route.name === 'list'}
